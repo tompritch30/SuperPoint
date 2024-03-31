@@ -22,10 +22,10 @@ if __name__ == "__main__":
     # Example usage
     import os
 
-    image_path = os.path.join(os.environ['DATA_DIR'], "TarTanAir-P002-Forest/image_left/000005_left.png")
+    image_path = os.path.join(os.environ['DATA_DIR'], "TarTanAir-P002-Forest/image_left/000008_left.png")
 
     output_path_resized = "resized_image.png"
-    output_path_gray = "grayscale_image_5.png"
+    output_path_gray = "grayscale_image_8.png"
     
     image = Image.open(image_path)
     print(image.size)  # Outputs (width, height)

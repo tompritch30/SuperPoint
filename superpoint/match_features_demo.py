@@ -39,7 +39,12 @@ def extract_superpoint_keypoints_and_descriptors(keypoint_map, descriptor_map,
     desc = descriptor_map[keypoints[:, 0], keypoints[:, 1]]
 
     # Convert from just pts to cv2.KeyPoints
-    keypoints = [cv2.KeyPoint(p[1], p[0], 1) for p in keypoints]
+    # Add a print statement to debug the keypoints values:
+    print("Line 43 testing: Keypoints before converting to KeyPoint objects:", keypoints)
+    keypoints = [cv2.KeyPoint(float(p[1]), float(p[0]), 1) for p in keypoints]
+
+    # This was the original code!!!
+    # keypoints = [cv2.KeyPoint(p[1], p[0], 1) for p in keypoints]
 
     return keypoints, desc
 
