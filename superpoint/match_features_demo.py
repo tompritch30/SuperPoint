@@ -1,12 +1,13 @@
 import argparse
 from pathlib import Path
 
-import cv2
 import numpy as np
-import tensorflow as tf  # noqa: E402
+# import tensorflow as tf  # noqa: E402
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+import cv2
 
 from superpoint.settings import EXPER_PATH  # noqa: E402
-
 
 def extract_SIFT_keypoints_and_descriptors(img):
     gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
