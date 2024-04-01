@@ -2,9 +2,10 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-# import tensorflow as tf  # noqa: E402
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
+import tensorflow as tf  # noqa: E402
+# import tensorflow.compat.v1 as tf
+# tf.disable_v2_behavior()
+
 import cv2
 
 from superpoint.settings import EXPER_PATH  # noqa: E402
@@ -78,12 +79,18 @@ def preprocess_image(img_file, img_size):
     img = cv2.resize(img, img_size)
     img_orig = img.copy()
 
+    # Original Code
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img = np.expand_dims(img, 2)
     img = img.astype(np.float32)
     img_preprocessed = img / 255.
-
     return img_preprocessed, img_orig
+
+    # img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # img_gray = np.expand_dims(img_gray, axis=-1)  # Add channel dimension
+    # img_gray = img_gray.astype(np.float32) / 255.0
+    # img_gray = np.expand_dims(img_gray, axis=0)  # Add batch dimension for model input
+    # return img_gray, img_orig
 
 
 if __name__ == '__main__':
@@ -114,57 +121,114 @@ if __name__ == '__main__':
     weights_root_dir.mkdir(parents=True, exist_ok=True)
     weights_dir = Path(weights_root_dir, weights_name)
 
-    graph = tf.Graph()
-    with tf.Session(graph=graph) as sess:
-        tf.saved_model.loader.load(sess,
-                                   [tf.saved_model.tag_constants.SERVING],
-                                   str(weights_dir))
+     # Load the SuperPoint model using TensorFlow SavedModel
+    loaded_model = tf.saved_model.load(str(weights_dir))
+    model = loaded_model.signatures['serving_default']
 
-        input_img_tensor = graph.get_tensor_by_name('superpoint/image:0')
-        output_prob_nms_tensor = graph.get_tensor_by_name('superpoint/prob_nms:0')
-        output_desc_tensors = graph.get_tensor_by_name('superpoint/descriptors:0')
+    # Preprocess the images
+    img1, img1_orig = preprocess_image(img1_file, img_size)
+    img2, img2_orig = preprocess_image(img2_file, img_size)
 
-        img1, img1_orig = preprocess_image(img1_file, img_size)
-        out1 = sess.run([output_prob_nms_tensor, output_desc_tensors],
-                        feed_dict={input_img_tensor: np.expand_dims(img1, 0)})
-        keypoint_map1 = np.squeeze(out1[0])
-        descriptor_map1 = np.squeeze(out1[1])
-        kp1, desc1 = extract_superpoint_keypoints_and_descriptors(
-                keypoint_map1, descriptor_map1, keep_k_best)
+    # Get keypoints and descriptors from the SuperPoint model
+    input_img = tf.expand_dims(img1[None, ...], axis=-1)  # Add batch dimension
+    outputs = model(input_img)
+    keypoint_map1, descriptor_map1 = outputs['prob_nms'], outputs['descriptors']
+    keypoint_map1, descriptor_map1 = keypoint_map1.numpy().squeeze(), descriptor_map1.numpy().squeeze()
 
-        img2, img2_orig = preprocess_image(img2_file, img_size)
-        out2 = sess.run([output_prob_nms_tensor, output_desc_tensors],
-                        feed_dict={input_img_tensor: np.expand_dims(img2, 0)})
-        keypoint_map2 = np.squeeze(out2[0])
-        descriptor_map2 = np.squeeze(out2[1])
-        kp2, desc2 = extract_superpoint_keypoints_and_descriptors(
-                keypoint_map2, descriptor_map2, keep_k_best)
+    input_img = tf.expand_dims(img2[None, ...], axis=-1)
+    outputs = model(input_img)
+    keypoint_map2, descriptor_map2 = outputs['prob_nms'], outputs['descriptors']
+    keypoint_map2, descriptor_map2 = keypoint_map2.numpy().squeeze(), descriptor_map2.numpy().squeeze()
 
-        # Match and get rid of outliers
-        m_kp1, m_kp2, matches = match_descriptors(kp1, desc1, kp2, desc2)
-        H, inliers = compute_homography(m_kp1, m_kp2)
+    # Extract keypoints and descriptors
+    kp1, desc1 = extract_superpoint_keypoints_and_descriptors(
+        keypoint_map1, descriptor_map1, keep_k_best)
+    kp2, desc2 = extract_superpoint_keypoints_and_descriptors(
+        keypoint_map2, descriptor_map2, keep_k_best)
 
-        # Draw SuperPoint matches
-        matches = np.array(matches)[inliers.astype(bool)].tolist()
-        matched_img = cv2.drawMatches(img1_orig, kp1, img2_orig, kp2, matches,
-                                      None, matchColor=(0, 255, 0),
-                                      singlePointColor=(0, 0, 255))
+    # Match and get rid of outliers
+    m_kp1, m_kp2, matches = match_descriptors(kp1, desc1, kp2, desc2)
+    H, inliers = compute_homography(m_kp1, m_kp2)
 
-        cv2.imshow("SuperPoint matches", matched_img)
+    # Draw SuperPoint matches
+    matches = np.array(matches)[inliers.astype(bool)].tolist()
+    matched_img = cv2.drawMatches(img1_orig, kp1, img2_orig, kp2, matches,
+                                    None, matchColor=(0, 255, 0),
+                                    singlePointColor=(0, 0, 255))
+    cv2.imshow("SuperPoint matches", matched_img)
 
-        # Compare SIFT matches
-        sift_kp1, sift_desc1 = extract_SIFT_keypoints_and_descriptors(img1_orig)
-        sift_kp2, sift_desc2 = extract_SIFT_keypoints_and_descriptors(img2_orig)
-        sift_m_kp1, sift_m_kp2, sift_matches = match_descriptors(
-                sift_kp1, sift_desc1, sift_kp2, sift_desc2)
-        sift_H, sift_inliers = compute_homography(sift_m_kp1, sift_m_kp2)
+    # Compare SIFT matches
+    sift_kp1, sift_desc1 = extract_SIFT_keypoints_and_descriptors(img1_orig)
+    sift_kp2, sift_desc2 = extract_SIFT_keypoints_and_descriptors(img2_orig)
+    sift_m_kp1, sift_m_kp2, sift_matches = match_descriptors(
+            sift_kp1, sift_desc1, sift_kp2, sift_desc2)
+    sift_H, sift_inliers = compute_homography(sift_m_kp1, sift_m_kp2)
 
-        # Draw SIFT matches
-        sift_matches = np.array(sift_matches)[sift_inliers.astype(bool)].tolist()
-        sift_matched_img = cv2.drawMatches(img1_orig, sift_kp1, img2_orig,
-                                           sift_kp2, sift_matches, None,
-                                           matchColor=(0, 255, 0),
-                                           singlePointColor=(0, 0, 255))
-        cv2.imshow("SIFT matches", sift_matched_img)
+    # Draw SIFT matches
+    sift_matches = np.array(sift_matches)[sift_inliers.astype(bool)].tolist()
+    sift_matched_img = cv2.drawMatches(img1_orig, sift_kp1, img2_orig,
+                                        sift_kp2, sift_matches, None,
+                                        matchColor=(0, 255, 0),
+                                        singlePointColor=(0, 0, 255))
+    cv2.imshow("SIFT matches", sift_matched_img)
 
-        cv2.waitKey(0)
+    cv2.waitKey(0) 
+
+
+    # weights_dir = Path(EXPER_PATH, 'saved_models', args.weights_name)
+
+    # graph = tf.Graph()
+    # with tf.Session(graph=graph) as sess:
+    #     tf.saved_model.loader.load(sess,
+    #                                [tf.saved_model.tag_constants.SERVING],
+    #                                str(weights_dir))
+    #     # model = tf.saved_model.load(str(weights_dir))
+
+    #     input_img_tensor = graph.get_tensor_by_name('superpoint/image:0')
+    #     output_prob_nms_tensor = graph.get_tensor_by_name('superpoint/prob_nms:0')
+    #     output_desc_tensors = graph.get_tensor_by_name('superpoint/descriptors:0')
+
+    #     img1, img1_orig = preprocess_image(img1_file, img_size)
+    #     out1 = sess.run([output_prob_nms_tensor, output_desc_tensors],
+    #                     feed_dict={input_img_tensor: np.expand_dims(img1, 0)})
+    #     keypoint_map1 = np.squeeze(out1[0])
+    #     descriptor_map1 = np.squeeze(out1[1])
+    #     kp1, desc1 = extract_superpoint_keypoints_and_descriptors(
+    #             keypoint_map1, descriptor_map1, keep_k_best)
+
+    #     img2, img2_orig = preprocess_image(img2_file, img_size)
+    #     out2 = sess.run([output_prob_nms_tensor, output_desc_tensors],
+    #                     feed_dict={input_img_tensor: np.expand_dims(img2, 0)})
+    #     keypoint_map2 = np.squeeze(out2[0])
+    #     descriptor_map2 = np.squeeze(out2[1])
+    #     kp2, desc2 = extract_superpoint_keypoints_and_descriptors(
+    #             keypoint_map2, descriptor_map2, keep_k_best)
+
+    #     # Match and get rid of outliers
+    #     m_kp1, m_kp2, matches = match_descriptors(kp1, desc1, kp2, desc2)
+    #     H, inliers = compute_homography(m_kp1, m_kp2)
+
+    #     # Draw SuperPoint matches
+    #     matches = np.array(matches)[inliers.astype(bool)].tolist()
+    #     matched_img = cv2.drawMatches(img1_orig, kp1, img2_orig, kp2, matches,
+    #                                   None, matchColor=(0, 255, 0),
+    #                                   singlePointColor=(0, 0, 255))
+
+    #     cv2.imshow("SuperPoint matches", matched_img)
+
+    #     # Compare SIFT matches
+    #     sift_kp1, sift_desc1 = extract_SIFT_keypoints_and_descriptors(img1_orig)
+    #     sift_kp2, sift_desc2 = extract_SIFT_keypoints_and_descriptors(img2_orig)
+    #     sift_m_kp1, sift_m_kp2, sift_matches = match_descriptors(
+    #             sift_kp1, sift_desc1, sift_kp2, sift_desc2)
+    #     sift_H, sift_inliers = compute_homography(sift_m_kp1, sift_m_kp2)
+
+    #     # Draw SIFT matches
+    #     sift_matches = np.array(sift_matches)[sift_inliers.astype(bool)].tolist()
+    #     sift_matched_img = cv2.drawMatches(img1_orig, sift_kp1, img2_orig,
+    #                                        sift_kp2, sift_matches, None,
+    #                                        matchColor=(0, 255, 0),
+    #                                        singlePointColor=(0, 0, 255))
+    #     cv2.imshow("SIFT matches", sift_matched_img)
+
+    #     cv2.waitKey(0)
